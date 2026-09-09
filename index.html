@@ -31,7 +31,7 @@ const SUPABASE_KEY = "sb_publishable_2OjoiiYIFHkZ1iv1VYXztg_S6ZeY-hx";
 const configured = !SUPABASE_URL.includes("請貼上") && !SUPABASE_KEY.includes("請貼上");
 const AVATAR_BUCKET = "child-photos";
 const sb = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth:{persistSession:true,autoRefreshToken:true}}) : null;
-let state={page:"home",children:[],history:[],family:null,session:null,operator:localStorage.getItem("family_operator")||"爸爸"};
+let state={page:"home",children:[],history:[],family:null,session:null,member:null,operator:""};
 
 const app=document.getElementById("app");
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
@@ -43,22 +43,59 @@ async function boot(){
   const {data:{session}}=await sb.auth.getSession(); state.session=session;
   if(!session){renderLogin();return}
   await loadFamily();
-  subscribe();
+  if(state.family) subscribe();
 }
 async function loadFamily(){
-  const {data:family}=await sb.from("families").select("*").eq("owner_id",state.session.user.id).maybeSingle();
-  if(!family){state.family=null;renderCreateFamily();return}
+  const {data:member,error:me}=await sb.from("family_members").select("*").eq("user_id",state.session.user.id).maybeSingle();
+  if(me)return alert("讀取帳號權限失敗："+me.message);
+  if(!member){state.member=null;state.family=null;renderNoAccess();return}
+  state.member=member; state.operator=member.display_name || (member.role==="parent"?"家長":"孩子");
+  const {data:family,error:fe}=await sb.from("families").select("*").eq("id",member.family_id).maybeSingle();
+  if(fe)return alert("讀取家庭資料失敗："+fe.message);
+  if(!family){state.family=null;renderNoAccess();return}
   state.family=family;
-  const {data:children,error:cerr}=await sb.from("children").select("*").eq("family_id",family.id).order("sort_order");
+  let cq=sb.from("children").select("*").eq("family_id",family.id).order("sort_order");
+  // 孩子帳號為共用查看帳號，因此不限制單一 child_id。
+  const {data:children,error:cerr}=await cq;
   if(cerr){alert(cerr.message);return}
   state.children=children||[];
-  const {data:history}=await sb.from("transactions").select("*").eq("family_id",family.id).order("created_at",{ascending:false}).limit(200);
+  let hq=sb.from("transactions").select("*").eq("family_id",family.id).order("created_at",{ascending:false}).limit(200);
+  // 孩子帳號可查看家庭內全部歷史紀錄。
+  const {data:history,error:he}=await hq;
+  if(he){alert(he.message);return}
   state.history=history||[];
   render();
 }
+function isParent(){return state.member?.role==="parent"}
 function subscribe(){
   sb.channel("family-sync").on("postgres_changes",{event:"*",schema:"public",table:"children",filter:`family_id=eq.${state.family.id}`},()=>loadFamily())
     .on("postgres_changes",{event:"*",schema:"public",table:"transactions",filter:`family_id=eq.${state.family.id}`},()=>loadFamily()).subscribe();
+}
+function renderSetup(){
+  app.innerHTML=`<div class="login"><h1>三寶家庭點數</h1><div class="notice">App 已連接雲端設定。請使用家長或孩子專用帳號登入。</div><p class="small">不要把 service_role / secret key 放進這個檔案。</p></div>`;
+}
+function renderLogin(){
+  app.innerHTML=`<div class="login"><h1>👨‍👩‍👧‍👦 三寶家庭點數</h1><p>請使用自己的帳號與密碼登入。</p>
+  <div class="card"><label>Email</label><input id="email" type="email" placeholder="請輸入帳號 Email"><label>密碼</label><input id="password" type="password" placeholder="請輸入密碼"><div class="row" style="margin-top:14px"><button class="primary" onclick="login()">登入</button></div></div>
+  <div class="notice">👨‍👩‍👧 家長帳號可以管理點數；👦 孩子帳號只能查看三個孩子的點數與紀錄。</div></div>`;
+}
+function renderNoAccess(){
+  app.innerHTML=`<div class="login"><h1>🔒 尚未開通</h1><div class="notice">這個帳號已登入，但尚未被加入「范家」的成員名單。請請家長在 Supabase 設定帳號權限。</div><button class="ghost" style="width:100%;margin-top:12px" onclick="logout()">登出</button></div>`;
+}
+async function login(){const e=email.value.trim(),p=password.value; if(!e||!p)return alert("請輸入 Email 與密碼");const {error}=await sb.auth.signInWithPassword({email:e,password:p});if(error)alert(error.message);else boot()}
+function renderCreateFamily(){
+  app.innerHTML=`<div class="login"><h1>建立家庭</h1><div class="card"><label>家庭名稱</label><input id="familyName" value="范家"><button class="primary" style="width:100%;margin-top:14px" onclick="createFamily()">建立「范家」</button></div><p class="small">建立後會自動產生：稀飯、湯圓、米果。</p></div>`;
+}
+async function createFamily(){
+  const name=familyName.value.trim()||"范家";
+  const {data:f,error}=await sb.from("families").insert({owner_id:state.session.user.id,name}).select().single();
+  if(error)return alert(error.message);
+  const {error:m}=await sb.from("family_members").insert({user_id:state.session.user.id,family_id:f.id,role:"parent",display_name:"爸爸"});
+  if(m)return alert("家庭建立成功，但家長權限建立失敗："+m.message);
+  const kids=[["稀飯","🍚",1],["湯圓","🍡",2],["米果","🍘",3]];
+  const {data:created,error:e}=await sb.from("children").insert(kids.map(x=>({family_id:f.id,name:x[0],emoji:x[1],points:0,sort_order:x[2]}))).select();
+  if(e)return alert(e.message);
+  await loadFamily(); if(state.family) subscribe();
 }
 function renderSetup(){
   app.innerHTML=`<div class="login"><h1>三寶家庭點數</h1><div class="notice">這是第三版雲端同步版。請先在程式碼上方填入 Supabase Project URL 與 Publishable Key，再把這個資料夾放到網站空間使用。</div><p class="small">不要把 service_role / secret key 放進這個檔案。</p></div>`;
@@ -88,28 +125,30 @@ function render(){
   if(state.page==="settings") renderSettings();
 }
 function header(){
- return `<div class="top"><h1>👨‍👩‍👧‍👦 ${esc(state.family.name)}</h1><p>三寶家庭點數</p><div class="sync">☁️ 雲端同步中　操作人：${esc(state.operator)}</div></div>`;
+ return `<div class="top"><h1>👨‍👩‍👧‍👦 ${esc(state.family.name)}</h1><p>三寶家庭點數</p><div class="role-badge">${isParent()?"👨‍👩‍👧 家長管理模式":"👦 孩子查看模式"}</div><div class="sync">☁️ 雲端同步中　登入者：${esc(state.operator)}</div></div>`;
 }
 function nav(){
  return `<div class="nav">
  <button class="${state.page==="home"?"active":""}" onclick="go('home')">🏠<br>首頁</button>
- <button class="${state.page==="reward"?"active":""}" onclick="go('reward')">🎁<br>獎勵</button>
+ ${isParent()?`<button class="${state.page==="reward"?"active":""}" onclick="go('reward')">🎁<br>獎勵</button>`:""}
  <button class="${state.page==="history"?"active":""}" onclick="go('history')">📖<br>紀錄</button>
  <button class="${state.page==="settings"?"active":""}" onclick="go('settings')">⚙️<br>設定</button></div>`;
 }
 function renderHome(){
- app.innerHTML=header()+`<div class="content"><div class="grid">${state.children.map(c=>`<div class="child">
- <div class="child-head"><div class="who"><button class="avatar-btn" onclick="openPhoto('${c.id}')" title="更換照片">${c.photo_url?`<img class="avatar" src="${esc(c.photo_url)}" alt="${esc(c.name)}">`:`<span class="avatar">${esc(c.emoji)}</span>`}<span class="avatar-edit">📷</span></button><div class="name">${esc(c.name)}</div></div><div><span class="points">${money(c.points)}</span><span class="unit">點</span></div></div>
- <div class="actions"><button class="add" onclick="openScore('${c.id}',1)">＋ 加分</button><button class="minus" onclick="openScore('${c.id}',-1)">－ 扣分</button></div></div>`).join("")}</div></div>${nav()}${modal}`;
+ app.innerHTML=header()+`<div class="content">${!isParent()?`<div class="readonly">👦 你目前是「孩子查看模式」，只能查看三個孩子的點數與紀錄，不能加分、扣分或修改資料。</div>`:""}<div class="grid">${state.children.map(c=>`<div class="child ${!isParent()?"child-readonly":""}">
+ <div class="child-head"><div class="who">${isParent()?`<button class="avatar-btn" onclick="openPhoto('${c.id}')" title="更換照片">${c.photo_url?`<img class="avatar" src="${esc(c.photo_url)}" alt="${esc(c.name)}">`:`<span class="avatar">${esc(c.emoji)}</span>`}<span class="avatar-edit">📷</span></button>`:`${c.photo_url?`<img class="avatar" src="${esc(c.photo_url)}" alt="${esc(c.name)}">`:`<span class="avatar">${esc(c.emoji)}</span>`}`}<div class="name">${esc(c.name)}</div></div><div><span class="points">${money(c.points)}</span><span class="unit">點</span></div></div>
+ ${isParent()?`<div class="actions"><button class="add" onclick="openScore('${c.id}',1)">＋ 加分</button><button class="minus" onclick="openScore('${c.id}',-1)">－ 扣分</button></div>`:""}</div>`).join("")}</div></div>${nav()}${modal}`;
 }
 const modal=`<div id="modal" class="modal"><div class="sheet"><button class="close" onclick="closeModal()">×</button><h2 id="mtitle"></h2><div id="mbody"></div></div></div>`;
 function openScore(id,dir){
+ if(!isParent())return alert("孩子帳號只能查看，不能操作點數。");
  const c=state.children.find(x=>x.id===id); window.scoreChild=id;window.scoreDir=dir;
  document.getElementById("modal").classList.add("show");document.getElementById("mtitle").textContent=(dir>0?"＋ 加分":"－ 扣分")+"｜"+c.name;
  document.getElementById("mbody").innerHTML=`<label>點數</label><input id="score" type="number" min="1" step="1" placeholder="例如 10"><label>原因</label><textarea id="reason" placeholder="${dir>0?"例如：主動整理房間":"例如：沒有收玩具"}"></textarea><button class="${dir>0?"add":"minus"} style="width:100%;margin-top:12px" onclick="saveScore()">確認${dir>0?"加分":"扣分"}</button>`;
 }
 function closeModal(){document.getElementById("modal")?.classList.remove("show")}
 async function saveScore(){
+ if(!isParent())return alert("孩子帳號沒有加分或扣分權限。");
  const n=Number(document.getElementById("score").value),r=document.getElementById("reason").value.trim(),c=state.children.find(x=>x.id===window.scoreChild);
  if(!n||n<=0||!r)return alert("請輸入點數與原因");
  if(window.scoreDir<0&&n>c.points)return alert("扣分不能超過目前點數");
@@ -119,6 +158,7 @@ async function saveScore(){
  if(u)return alert(u.message); closeModal();await loadFamily();
 }
 function renderReward(){
+ if(!isParent()){state.page="home";return renderHome()}
  app.innerHTML=header()+`<div class="content"><div class="section-title">🎁 兌換獎勵</div><div class="card">
  <label>孩子</label><select id="rewardChild">${state.children.map(c=>`<option value="${c.id}">${esc(c.emoji)} ${esc(c.name)}（${money(c.points)} 點）</option>`).join("")}</select>
  <label>兌換內容</label><textarea id="rewardReason" placeholder="例如：看電視 30 分鐘、買小玩具一次"></textarea>
@@ -126,6 +166,7 @@ function renderReward(){
  <button class="primary" style="width:100%;margin-top:14px" onclick="redeem()">確認兌換</button></div></div>${nav()}`;
 }
 async function redeem(){
+ if(!isParent())return alert("孩子帳號沒有兌換獎勵權限。");
  const c=state.children.find(x=>x.id===rewardChild.value),n=Number(rewardPoints.value),r=rewardReason.value.trim();
  if(!c||!n||n<=0||!r)return alert("請完整填寫兌換內容與點數");
  if(n>c.points)return alert(`目前只有 ${c.points} 點，無法兌換。`);
@@ -135,9 +176,10 @@ async function redeem(){
  if(u)return alert(u.message); await loadFamily(); alert(`已完成兌換：${r}`);
 }
 function renderHistory(){
- app.innerHTML=header()+`<div class="content"><div class="section-title">📖 最近紀錄</div><div class="card">${state.history.length?state.history.map(h=>`<div class="history-item"><div class="hmain"><strong>${esc(h.child_name)}　${esc(h.kind)}</strong><div class="reason">${esc(h.reason)}</div><div class="meta">${fmt(h.created_at)} · ${esc(h.operator)}</div></div><div class="history-actions"><div class="${h.points>=0?"pos":"neg"}">${h.points>=0?"+":""}${money(h.points)}</div><button class="edit-btn" onclick="openEditHistory('${h.id}')">✏️ 修改</button><button class="delete-btn" onclick="deleteHistory('${h.id}')">🗑️ 刪除</button></div></div>`).join(""):`<div class="empty">目前還沒有紀錄</div>`}</div></div>${nav()}`;
+ app.innerHTML=header()+`<div class="content"><div class="section-title">📖 最近紀錄</div><div class="card">${state.history.length?state.history.map(h=>`<div class="history-item"><div class="hmain"><strong>${esc(h.child_name)}　${esc(h.kind)}</strong><div class="reason">${esc(h.reason)}</div><div class="meta">${fmt(h.created_at)} · ${esc(h.operator)}</div></div><div class="history-actions"><div class="${h.points>=0?"pos":"neg"}">${h.points>=0?"+":""}${money(h.points)}</div>${isParent()?`<button class="edit-btn" onclick="openEditHistory('${h.id}')">✏️ 修改</button><button class="delete-btn" onclick="deleteHistory('${h.id}')">🗑️ 刪除</button>`:""}</div></div>`).join(""):`<div class="empty">目前還沒有紀錄</div>`}</div></div>${nav()}`;
 }
 function openEditHistory(id){
+ if(!isParent())return alert("孩子帳號不能修改紀錄。");
  const h=state.history.find(x=>x.id===id);
  if(!h)return;
  window.editHistoryId=id;
@@ -147,6 +189,7 @@ function openEditHistory(id){
  document.getElementById("mbody").innerHTML=`<div class="notice" style="margin-bottom:10px">${esc(h.child_name)}｜${esc(h.kind)}<br><span class="small">原始點數：${h.points>=0?"+":"-"}${money(magnitude)}　原操作人：${esc(h.operator)}</span></div><label>點數</label><input id="editPoints" type="number" min="1" step="1" value="${magnitude}"><label>原因</label><textarea id="editReason">${esc(h.reason)}</textarea><button class="primary" style="width:100%;margin-top:12px" onclick="saveEditHistory()">儲存修改</button>`;
 }
 async function saveEditHistory(){
+ if(!isParent())return alert("孩子帳號不能修改紀錄。");
  const h=state.history.find(x=>x.id===window.editHistoryId);
  if(!h)return;
  const n=Number(document.getElementById("editPoints").value),r=document.getElementById("editReason").value.trim();
@@ -167,6 +210,7 @@ async function saveEditHistory(){
  closeModal();await loadFamily();
 }
 async function deleteHistory(id){
+ if(!isParent())return alert("孩子帳號不能刪除紀錄。");
  const h=state.history.find(x=>x.id===id);
  if(!h)return;
  const c=state.children.find(x=>x.id===h.child_id);
@@ -188,6 +232,9 @@ async function deleteHistory(id){
 }
 
 async function openPhoto(id){
+ if(!isParent())return alert("孩子帳號只能查看，不能修改照片。");
+ if(!isParent())return alert("孩子帳號只能查看，不能修改照片。");
+ if(!isParent())return alert("孩子帳號只能查看，不能修改照片。");
   const c=state.children.find(x=>x.id===id); window.photoChild=id;
   document.getElementById("modal").classList.add("show");
   document.getElementById("mtitle").textContent="📷 "+c.name+" 的照片";
@@ -207,6 +254,9 @@ function previewPhoto(input){
   document.getElementById("mbody").insertAdjacentHTML("afterbegin",`<div id="previewWrap" style="text-align:center"><img id="previewImg" class="avatar" style="width:120px;height:120px" src="${url}"></div>`);
 }
 async function savePhoto(){
+ if(!isParent())return alert("孩子帳號沒有修改照片的權限。");
+ if(!isParent())return alert("孩子帳號沒有修改照片的權限。");
+ if(!isParent())return alert("孩子帳號沒有修改照片的權限。");
   const file=document.getElementById("photoFile")?.files?.[0];
   if(!file)return alert("請先選擇照片");
   if(file.size>5*1024*1024)return alert("照片請控制在 5MB 以內");
@@ -221,16 +271,18 @@ async function savePhoto(){
   closeModal();await loadFamily();
 }
 async function removePhoto(){
+ if(!isParent())return alert("孩子帳號沒有修改照片的權限。");
+ if(!isParent())return alert("孩子帳號沒有修改照片的權限。");
+ if(!isParent())return alert("孩子帳號沒有修改照片的權限。");
   const c=state.children.find(x=>x.id===window.photoChild);
   const {error}=await sb.from("children").update({photo_url:null}).eq("id",c.id);
   if(error)return alert(error.message);
   closeModal();await loadFamily();
 }
 function renderSettings(){
- app.innerHTML=header()+`<div class="content"><div class="section-title">⚙️ 設定</div><div class="card"><label>目前操作人</label><select id="op" onchange="setOperator(this.value)"><option ${state.operator==="爸爸"?"selected":""}>爸爸</option><option ${state.operator==="媽媽"?"selected":""}>媽媽</option></select><p class="small">這個設定只用來標示「誰操作」，爸爸與媽媽仍使用同一個家庭帳號。</p></div><div class="card"><button class="ghost" style="width:100%" onclick="refresh()">🔄 立即同步</button><button class="ghost" style="width:100%;margin-top:8px" onclick="logout()">登出</button></div><div class="notice">安全提醒：前端只應使用 Supabase Publishable Key；不要把 service_role / secret key 貼進 App。資料表也必須開啟 RLS。</div></div>${nav()}`;
+ app.innerHTML=header()+`<div class="content"><div class="section-title">⚙️ 設定</div><div class="card"><div class="notice">目前登入：<strong>${esc(state.operator)}</strong><br>${isParent()?"👨‍👩‍👧 你是家長帳號，可以管理所有點數與紀錄。":"👦 你是孩子帳號，只能查看三個孩子的點數與紀錄。"}</div></div><div class="card"><button class="ghost" style="width:100%" onclick="refresh()">🔄 立即同步</button><button class="ghost" style="width:100%;margin-top:8px" onclick="logout()">登出</button></div><div class="notice">🔐 權限由 Supabase 資料庫控制。孩子帳號即使直接操作網頁，也無法寫入、修改或刪除點數資料。</div></div>${nav()}`;
 }
-function setOperator(v){state.operator=v;localStorage.setItem("family_operator",v);render()}
-function go(p){state.page=p;render()}
+function go(p){if(p==="reward"&&!isParent())p="home";state.page=p;render()}
 async function refresh(){await loadFamily();alert("已重新同步")}
 async function logout(){await sb.auth.signOut();location.reload()}
 boot();
