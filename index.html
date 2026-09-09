@@ -18,7 +18,7 @@
 label{display:block;font-size:13px;color:var(--muted);font-weight:700;margin:11px 0 6px}input,select,textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:11px;font-size:16px;background:#fff}textarea{min-height:80px;resize:vertical}
 .nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(520px,100%);background:#fff;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:10}.nav button{background:transparent;color:#6b7280;font-size:12px;padding:7px 2px}.nav button.active{color:var(--accent)}
 .modal{position:fixed;inset:0;background:#0008;display:none;align-items:flex-end;justify-content:center;z-index:20}.modal.show{display:flex}.sheet{width:min(520px,100%);background:#fff;border-radius:22px 22px 0 0;padding:18px 18px calc(20px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}.sheet h2{margin:0 0 6px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.close{float:right;background:#f1f1f1;border-radius:50%;width:36px;height:36px;padding:0}
-.history-item{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #eee}.history-item:last-child{border-bottom:0}.hmain{min-width:0}.hmain strong{display:block}.reason{color:var(--muted);font-size:13px;margin-top:3px;word-break:break-word}.meta{color:#9ca3af;font-size:11px;margin-top:4px}.pos{color:var(--green);font-weight:800}.neg{color:var(--red);font-weight:800}
+.history-item{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #eee}.history-item:last-child{border-bottom:0}.hmain{min-width:0;flex:1}.hmain strong{display:block}.reason{color:var(--muted);font-size:13px;margin-top:3px;word-break:break-word}.meta{color:#9ca3af;font-size:11px;margin-top:4px}.pos{color:var(--green);font-weight:800}.neg{color:var(--red);font-weight:800}.history-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end}.edit-btn,.delete-btn{padding:7px 9px;font-size:12px;border-radius:9px}.edit-btn{background:#eef2ff;color:#4f46e5}.delete-btn{background:#fff0f0;color:var(--red)}
 .login{padding:28px 18px}.login h1{font-size:28px}.notice{background:#fff8e6;border:1px solid #f4d58d;border-radius:14px;padding:12px;font-size:13px;color:#6b4f13;line-height:1.55}
 .empty{text-align:center;color:var(--muted);padding:30px 10px}.small{font-size:12px;color:var(--muted);line-height:1.5}.danger{color:var(--red)}
 </style>
@@ -26,8 +26,8 @@ label{display:block;font-size:13px;color:var(--muted);font-weight:700;margin:11p
 <body>
 <div id="app"></div>
 <script>
-const SUPABASE_URL = "https://tclzwvxbopythvlneqdq.supabase.co";
-const SUPABASE_KEY = "sb_publishable_2OjoiiYIFHkZ1iv1VYXztg_S6ZeY-hx";
+const SUPABASE_URL = "請貼上你的 Supabase Project URL";
+const SUPABASE_KEY = "請貼上你的 Supabase Publishable Key";
 const configured = !SUPABASE_URL.includes("請貼上") && !SUPABASE_KEY.includes("請貼上");
 const AVATAR_BUCKET = "child-photos";
 const sb = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth:{persistSession:true,autoRefreshToken:true}}) : null;
@@ -135,7 +135,56 @@ async function redeem(){
  if(u)return alert(u.message); await loadFamily(); alert(`已完成兌換：${r}`);
 }
 function renderHistory(){
- app.innerHTML=header()+`<div class="content"><div class="section-title">📖 最近紀錄</div><div class="card">${state.history.length?state.history.map(h=>`<div class="history-item"><div class="hmain"><strong>${esc(h.child_name)}　${esc(h.kind)}</strong><div class="reason">${esc(h.reason)}</div><div class="meta">${fmt(h.created_at)} · ${esc(h.operator)}</div></div><div class="${h.points>=0?"pos":"neg"}">${h.points>=0?"+":""}${money(h.points)}</div></div>`).join(""):`<div class="empty">目前還沒有紀錄</div>`}</div></div>${nav()}`;
+ app.innerHTML=header()+`<div class="content"><div class="section-title">📖 最近紀錄</div><div class="card">${state.history.length?state.history.map(h=>`<div class="history-item"><div class="hmain"><strong>${esc(h.child_name)}　${esc(h.kind)}</strong><div class="reason">${esc(h.reason)}</div><div class="meta">${fmt(h.created_at)} · ${esc(h.operator)}</div></div><div class="history-actions"><div class="${h.points>=0?"pos":"neg"}">${h.points>=0?"+":""}${money(h.points)}</div><button class="edit-btn" onclick="openEditHistory('${h.id}')">✏️ 修改</button><button class="delete-btn" onclick="deleteHistory('${h.id}')">🗑️ 刪除</button></div></div>`).join(""):`<div class="empty">目前還沒有紀錄</div>`}</div></div>${nav()}`;
+}
+function openEditHistory(id){
+ const h=state.history.find(x=>x.id===id);
+ if(!h)return;
+ window.editHistoryId=id;
+ document.getElementById("modal").classList.add("show");
+ document.getElementById("mtitle").textContent="✏️ 修改紀錄";
+ const magnitude=Math.abs(Number(h.points||0));
+ document.getElementById("mbody").innerHTML=`<div class="notice" style="margin-bottom:10px">${esc(h.child_name)}｜${esc(h.kind)}<br><span class="small">原始點數：${h.points>=0?"+":"-"}${money(magnitude)}　原操作人：${esc(h.operator)}</span></div><label>點數</label><input id="editPoints" type="number" min="1" step="1" value="${magnitude}"><label>原因</label><textarea id="editReason">${esc(h.reason)}</textarea><button class="primary" style="width:100%;margin-top:12px" onclick="saveEditHistory()">儲存修改</button>`;
+}
+async function saveEditHistory(){
+ const h=state.history.find(x=>x.id===window.editHistoryId);
+ if(!h)return;
+ const n=Number(document.getElementById("editPoints").value),r=document.getElementById("editReason").value.trim();
+ if(!n||n<=0||!r)return alert("請輸入點數與原因");
+ const c=state.children.find(x=>x.id===h.child_id);
+ if(!c)return alert("找不到這筆紀錄對應的孩子");
+ const sign=h.points>=0?1:-1;
+ const newPoints=sign*n;
+ const updatedTotal=c.points-h.points+newPoints;
+ if(updatedTotal<0)return alert(`修改後 ${c.name} 的點數會變成負數，目前最多只能扣 ${money(c.points-h.points)} 點。`);
+ const {error:u}=await sb.from("children").update({points:updatedTotal}).eq("id",c.id);
+ if(u)return alert("總點數更新失敗："+u.message);
+ const {error:t}=await sb.from("transactions").update({points:newPoints,reason:r}).eq("id",h.id);
+ if(t){
+   await sb.from("children").update({points:c.points}).eq("id",c.id);
+   return alert("紀錄修改失敗："+t.message);
+ }
+ closeModal();await loadFamily();
+}
+async function deleteHistory(id){
+ const h=state.history.find(x=>x.id===id);
+ if(!h)return;
+ const c=state.children.find(x=>x.id===h.child_id);
+ if(!c)return alert("找不到這筆紀錄對應的孩子");
+ const action=h.points>=0?"加分":"扣分";
+ const detail=`${h.child_name}｜${h.kind}｜${h.points>=0?"+":""}${money(h.points)}\n原因：${h.reason}`;
+ if(!confirm(`確定要刪除這筆紀錄嗎？\n\n${detail}\n\n刪除後，${h.points>=0?"會扣回原本加上的點數":"會補回原本扣掉的點數"}。`))return;
+ const restoredTotal=c.points-h.points;
+ if(restoredTotal<0)return alert("目前點數資料異常，無法安全刪除這筆紀錄。");
+ const {error:t}=await sb.from("transactions").delete().eq("id",h.id);
+ if(t)return alert("刪除紀錄失敗："+t.message);
+ const {error:u}=await sb.from("children").update({points:restoredTotal}).eq("id",c.id);
+ if(u){
+   alert("紀錄已刪除，但總點數更新失敗，請立即按「立即同步」檢查。");
+   await loadFamily();
+   return;
+ }
+ await loadFamily();
 }
 
 async function openPhoto(id){
