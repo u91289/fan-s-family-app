@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>三寶家庭點數</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--text:#202124;--muted:#6b7280;--line:#e5e7eb;--accent:#5b6ee1;--green:#15803d;--red:#dc2626;--gold:#b7791f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif;color:var(--text)}
+.app{max-width:520px;margin:auto;min-height:100vh;padding-bottom:84px}.top{padding:24px 18px 12px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border-radius:0 0 24px 24px}
+.top h1{margin:0 0 4px;font-size:24px}.top p{margin:0;opacity:.88;font-size:13px}.sync{font-size:12px;margin-top:10px;opacity:.9}
+.content{padding:14px}.grid{display:grid;gap:12px}.child{background:var(--card);border-radius:20px;padding:16px;box-shadow:0 4px 18px #0000000b;border:1px solid #eee}
+.child-head{display:flex;align-items:center;justify-content:space-between}.who{display:flex;align-items:center;gap:10px}.emoji{font-size:34px}.avatar{width:54px;height:54px;border-radius:50%;object-fit:cover;border:3px solid #fff;box-shadow:0 2px 8px #0002;background:#f0f1f5}.avatar-btn{position:relative;display:inline-flex}.avatar-edit{position:absolute;right:-2px;bottom:-2px;width:22px;height:22px;border-radius:50%;padding:0;font-size:12px;background:#fff;border:1px solid #ddd;color:#555}.name{font-weight:800;font-size:19px}.points{font-size:30px;font-weight:900;color:var(--accent)}.unit{font-size:13px;color:var(--muted);margin-left:3px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}button{border:0;border-radius:12px;padding:12px 10px;font-size:15px;font-weight:700;cursor:pointer}button:active{transform:scale(.98)}
+.add{background:#eaf8ef;color:var(--green)}.minus{background:#fff0f0;color:var(--red)}.primary{background:var(--accent);color:#fff}.ghost{background:#f0f1f5;color:#374151}
+.section-title{font-weight:800;margin:8px 2px 12px;font-size:17px}.card{background:#fff;border:1px solid #eee;border-radius:18px;padding:15px;margin-bottom:12px}
+label{display:block;font-size:13px;color:var(--muted);font-weight:700;margin:11px 0 6px}input,select,textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:11px;font-size:16px;background:#fff}textarea{min-height:80px;resize:vertical}
+.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(520px,100%);background:#fff;border-top:1px solid var(--line);display:grid;grid-template-columns:repeat(4,1fr);padding:8px 8px calc(8px + env(safe-area-inset-bottom));z-index:10}.nav button{background:transparent;color:#6b7280;font-size:12px;padding:7px 2px}.nav button.active{color:var(--accent)}
+.modal{position:fixed;inset:0;background:#0008;display:none;align-items:flex-end;justify-content:center;z-index:20}.modal.show{display:flex}.sheet{width:min(520px,100%);background:#fff;border-radius:22px 22px 0 0;padding:18px 18px calc(20px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}.sheet h2{margin:0 0 6px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.close{float:right;background:#f1f1f1;border-radius:50%;width:36px;height:36px;padding:0}
+.history-item{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #eee}.history-item:last-child{border-bottom:0}.hmain{min-width:0}.hmain strong{display:block}.reason{color:var(--muted);font-size:13px;margin-top:3px;word-break:break-word}.meta{color:#9ca3af;font-size:11px;margin-top:4px}.pos{color:var(--green);font-weight:800}.neg{color:var(--red);font-weight:800}
+.login{padding:28px 18px}.login h1{font-size:28px}.notice{background:#fff8e6;border:1px solid #f4d58d;border-radius:14px;padding:12px;font-size:13px;color:#6b4f13;line-height:1.55}
+.empty{text-align:center;color:var(--muted);padding:30px 10px}.small{font-size:12px;color:var(--muted);line-height:1.5}.danger{color:var(--red)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const SUPABASE_URL = "https://tclzwvxbopythvlneqdq.supabase.co";
+const SUPABASE_KEY = "sb_publishable_2OjoiiYIFHkZ1iv1VYXztg_S6ZeY-hx";
+const configured = !SUPABASE_URL.includes("請貼上") && !SUPABASE_KEY.includes("請貼上");
+const AVATAR_BUCKET = "child-photos";
+const sb = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth:{persistSession:true,autoRefreshToken:true}}) : null;
+let state={page:"home",children:[],history:[],family:null,session:null,operator:localStorage.getItem("family_operator")||"爸爸"};
+
+const app=document.getElementById("app");
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+function money(n){return Number(n||0).toLocaleString("zh-TW")}
+function fmt(d){return new Date(d).toLocaleString("zh-TW",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}
+
+async function boot(){
+  if(!configured){renderSetup();return}
+  const {data:{session}}=await sb.auth.getSession(); state.session=session;
+  if(!session){renderLogin();return}
+  await loadFamily();
+  subscribe();
+}
+async function loadFamily(){
+  const {data:family}=await sb.from("families").select("*").eq("owner_id",state.session.user.id).maybeSingle();
+  if(!family){state.family=null;renderCreateFamily();return}
+  state.family=family;
+  const {data:children,error:cerr}=await sb.from("children").select("*").eq("family_id",family.id).order("sort_order");
+  if(cerr){alert(cerr.message);return}
+  state.children=children||[];
+  const {data:history}=await sb.from("transactions").select("*").eq("family_id",family.id).order("created_at",{ascending:false}).limit(200);
+  state.history=history||[];
+  render();
+}
+function subscribe(){
+  sb.channel("family-sync").on("postgres_changes",{event:"*",schema:"public",table:"children",filter:`family_id=eq.${state.family.id}`},()=>loadFamily())
+    .on("postgres_changes",{event:"*",schema:"public",table:"transactions",filter:`family_id=eq.${state.family.id}`},()=>loadFamily()).subscribe();
+}
+function renderSetup(){
+  app.innerHTML=`<div class="login"><h1>三寶家庭點數</h1><div class="notice">這是第三版雲端同步版。請先在程式碼上方填入 Supabase Project URL 與 Publishable Key，再把這個資料夾放到網站空間使用。</div><p class="small">不要把 service_role / secret key 放進這個檔案。</p></div>`;
+}
+function renderLogin(){
+  app.innerHTML=`<div class="login"><h1>👨‍👩‍👧‍👦 三寶家庭點數</h1><p>爸爸、媽媽使用同一個家庭帳號，就能看到同一份點數。</p>
+  <div class="card"><label>Email</label><input id="email" type="email" placeholder="家庭帳號 Email"><label>密碼</label><input id="password" type="password" placeholder="密碼"><div class="row" style="margin-top:14px"><button class="primary" onclick="login()">登入</button><button class="ghost" onclick="signup()">建立帳號</button></div></div>
+  <div class="notice">建議建立一個家庭專用帳號，爸爸與媽媽兩支手機登入同一帳號即可。操作人會另外選擇「爸爸／媽媽」。</div></div>`;
+}
+async function login(){const e=email.value.trim(),p=password.value; if(!e||!p)return alert("請輸入 Email 與密碼");const {error}=await sb.auth.signInWithPassword({email:e,password:p});if(error)alert(error.message);else boot()}
+async function signup(){const e=email.value.trim(),p=password.value;if(!e||p.length<6)return alert("請輸入 Email，密碼至少 6 碼");const {error}=await sb.auth.signUp({email:e,password:p});if(error)alert(error.message);else alert("帳號已建立。若系統要求 Email 驗證，請先完成驗證，再回來登入。")}
+function renderCreateFamily(){
+  app.innerHTML=`<div class="login"><h1>建立家庭</h1><div class="card"><label>家庭名稱</label><input id="familyName" value="范家"><button class="primary" style="width:100%;margin-top:14px" onclick="createFamily()">建立「范家」</button></div><p class="small">建立後會自動產生：稀飯、湯圓、米果。</p></div>`;
+}
+async function createFamily(){
+  const name=familyName.value.trim()||"范家";
+  const {data:f,error}=await sb.from("families").insert({owner_id:state.session.user.id,name}).select().single();
+  if(error)return alert(error.message);
+  const kids=[["稀飯","🍚",1],["湯圓","🍡",2],["米果","🍘",3]];
+  const {error:e}=await sb.from("children").insert(kids.map(x=>({family_id:f.id,name:x[0],emoji:x[1],points:0,sort_order:x[2]})));
+  if(e)return alert(e.message); await loadFamily(); subscribe();
+}
+function render(){
+  if(state.page==="home") renderHome();
+  if(state.page==="reward") renderReward();
+  if(state.page==="history") renderHistory();
+  if(state.page==="settings") renderSettings();
+}
+function header(){
+ return `<div class="top"><h1>👨‍👩‍👧‍👦 ${esc(state.family.name)}</h1><p>三寶家庭點數</p><div class="sync">☁️ 雲端同步中　操作人：${esc(state.operator)}</div></div>`;
+}
+function nav(){
+ return `<div class="nav">
+ <button class="${state.page==="home"?"active":""}" onclick="go('home')">🏠<br>首頁</button>
+ <button class="${state.page==="reward"?"active":""}" onclick="go('reward')">🎁<br>獎勵</button>
+ <button class="${state.page==="history"?"active":""}" onclick="go('history')">📖<br>紀錄</button>
+ <button class="${state.page==="settings"?"active":""}" onclick="go('settings')">⚙️<br>設定</button></div>`;
+}
+function renderHome(){
+ app.innerHTML=header()+`<div class="content"><div class="grid">${state.children.map(c=>`<div class="child">
+ <div class="child-head"><div class="who"><button class="avatar-btn" onclick="openPhoto('${c.id}')" title="更換照片">${c.photo_url?`<img class="avatar" src="${esc(c.photo_url)}" alt="${esc(c.name)}">`:`<span class="avatar">${esc(c.emoji)}</span>`}<span class="avatar-edit">📷</span></button><div class="name">${esc(c.name)}</div></div><div><span class="points">${money(c.points)}</span><span class="unit">點</span></div></div>
+ <div class="actions"><button class="add" onclick="openScore('${c.id}',1)">＋ 加分</button><button class="minus" onclick="openScore('${c.id}',-1)">－ 扣分</button></div></div>`).join("")}</div></div>${nav()}${modal}`;
+}
+const modal=`<div id="modal" class="modal"><div class="sheet"><button class="close" onclick="closeModal()">×</button><h2 id="mtitle"></h2><div id="mbody"></div></div></div>`;
+function openScore(id,dir){
+ const c=state.children.find(x=>x.id===id); window.scoreChild=id;window.scoreDir=dir;
+ document.getElementById("modal").classList.add("show");document.getElementById("mtitle").textContent=(dir>0?"＋ 加分":"－ 扣分")+"｜"+c.name;
+ document.getElementById("mbody").innerHTML=`<label>點數</label><input id="score" type="number" min="1" step="1" placeholder="例如 10"><label>原因</label><textarea id="reason" placeholder="${dir>0?"例如：主動整理房間":"例如：沒有收玩具"}"></textarea><button class="${dir>0?"add":"minus"} style="width:100%;margin-top:12px" onclick="saveScore()">確認${dir>0?"加分":"扣分"}</button>`;
+}
+function closeModal(){document.getElementById("modal")?.classList.remove("show")}
+async function saveScore(){
+ const n=Number(document.getElementById("score").value),r=document.getElementById("reason").value.trim(),c=state.children.find(x=>x.id===window.scoreChild);
+ if(!n||n<=0||!r)return alert("請輸入點數與原因");
+ if(window.scoreDir<0&&n>c.points)return alert("扣分不能超過目前點數");
+ const {error}=await sb.from("transactions").insert({family_id:state.family.id,child_id:c.id,child_name:c.name,operator:state.operator,kind:window.scoreDir>0?"加分":"扣分",points:window.scoreDir>0?n:-n,reason:r});
+ if(error)return alert(error.message);
+ const {error:u}=await sb.from("children").update({points:c.points+(window.scoreDir>0?n:-n)}).eq("id",c.id);
+ if(u)return alert(u.message); closeModal();await loadFamily();
+}
+function renderReward(){
+ app.innerHTML=header()+`<div class="content"><div class="section-title">🎁 兌換獎勵</div><div class="card">
+ <label>孩子</label><select id="rewardChild">${state.children.map(c=>`<option value="${c.id}">${esc(c.emoji)} ${esc(c.name)}（${money(c.points)} 點）</option>`).join("")}</select>
+ <label>兌換內容</label><textarea id="rewardReason" placeholder="例如：看電視 30 分鐘、買小玩具一次"></textarea>
+ <label>使用點數</label><input id="rewardPoints" type="number" min="1" step="1" placeholder="例如 30">
+ <button class="primary" style="width:100%;margin-top:14px" onclick="redeem()">確認兌換</button></div></div>${nav()}`;
+}
+async function redeem(){
+ const c=state.children.find(x=>x.id===rewardChild.value),n=Number(rewardPoints.value),r=rewardReason.value.trim();
+ if(!c||!n||n<=0||!r)return alert("請完整填寫兌換內容與點數");
+ if(n>c.points)return alert(`目前只有 ${c.points} 點，無法兌換。`);
+ const {error}=await sb.from("transactions").insert({family_id:state.family.id,child_id:c.id,child_name:c.name,operator:state.operator,kind:"獎勵兌換",points:-n,reason:r});
+ if(error)return alert(error.message);
+ const {error:u}=await sb.from("children").update({points:c.points-n}).eq("id",c.id);
+ if(u)return alert(u.message); await loadFamily(); alert(`已完成兌換：${r}`);
+}
+function renderHistory(){
+ app.innerHTML=header()+`<div class="content"><div class="section-title">📖 最近紀錄</div><div class="card">${state.history.length?state.history.map(h=>`<div class="history-item"><div class="hmain"><strong>${esc(h.child_name)}　${esc(h.kind)}</strong><div class="reason">${esc(h.reason)}</div><div class="meta">${fmt(h.created_at)} · ${esc(h.operator)}</div></div><div class="${h.points>=0?"pos":"neg"}">${h.points>=0?"+":""}${money(h.points)}</div></div>`).join(""):`<div class="empty">目前還沒有紀錄</div>`}</div></div>${nav()}`;
+}
+
+async function openPhoto(id){
+  const c=state.children.find(x=>x.id===id); window.photoChild=id;
+  document.getElementById("modal").classList.add("show");
+  document.getElementById("mtitle").textContent="📷 "+c.name+" 的照片";
+  document.getElementById("mbody").innerHTML=`
+    <div style="text-align:center;margin:8px 0 16px">
+      ${c.photo_url?`<img class="avatar" style="width:120px;height:120px" src="${esc(c.photo_url)}">`:`<div class="avatar" style="width:120px;height:120px;display:inline-flex;align-items:center;justify-content:center;font-size:60px">${esc(c.emoji)}</div>`}
+    </div>
+    <label>選擇照片</label>
+    <input id="photoFile" type="file" accept="image/*" onchange="previewPhoto(this)">
+    <p class="small">建議使用孩子的正方形照片。App 會自動裁成圓形。</p>
+    <button class="primary" style="width:100%;margin-top:10px" onclick="savePhoto()">儲存照片</button>
+    ${c.photo_url?`<button class="ghost" style="width:100%;margin-top:8px" onclick="removePhoto()">移除照片</button>`:""}`;
+}
+function previewPhoto(input){
+  if(!input.files[0])return;
+  const url=URL.createObjectURL(input.files[0]);
+  document.getElementById("mbody").insertAdjacentHTML("afterbegin",`<div id="previewWrap" style="text-align:center"><img id="previewImg" class="avatar" style="width:120px;height:120px" src="${url}"></div>`);
+}
+async function savePhoto(){
+  const file=document.getElementById("photoFile")?.files?.[0];
+  if(!file)return alert("請先選擇照片");
+  if(file.size>5*1024*1024)return alert("照片請控制在 5MB 以內");
+  const c=state.children.find(x=>x.id===window.photoChild);
+  const ext=(file.name.split(".").pop()||"jpg").toLowerCase().replace(/[^a-z0-9]/g,"")||"jpg";
+  const path=`${state.family.id}/${c.id}-${Date.now()}.${ext}`;
+  const {error:up}=await sb.storage.from(AVATAR_BUCKET).upload(path,file,{upsert:true,contentType:file.type||"image/jpeg"});
+  if(up)return alert("照片上傳失敗："+up.message);
+  const {data}=sb.storage.from(AVATAR_BUCKET).getPublicUrl(path);
+  const {error:u}=await sb.from("children").update({photo_url:data.publicUrl}).eq("id",c.id);
+  if(u)return alert("照片網址儲存失敗："+u.message);
+  closeModal();await loadFamily();
+}
+async function removePhoto(){
+  const c=state.children.find(x=>x.id===window.photoChild);
+  const {error}=await sb.from("children").update({photo_url:null}).eq("id",c.id);
+  if(error)return alert(error.message);
+  closeModal();await loadFamily();
+}
+function renderSettings(){
+ app.innerHTML=header()+`<div class="content"><div class="section-title">⚙️ 設定</div><div class="card"><label>目前操作人</label><select id="op" onchange="setOperator(this.value)"><option ${state.operator==="爸爸"?"selected":""}>爸爸</option><option ${state.operator==="媽媽"?"selected":""}>媽媽</option></select><p class="small">這個設定只用來標示「誰操作」，爸爸與媽媽仍使用同一個家庭帳號。</p></div><div class="card"><button class="ghost" style="width:100%" onclick="refresh()">🔄 立即同步</button><button class="ghost" style="width:100%;margin-top:8px" onclick="logout()">登出</button></div><div class="notice">安全提醒：前端只應使用 Supabase Publishable Key；不要把 service_role / secret key 貼進 App。資料表也必須開啟 RLS。</div></div>${nav()}`;
+}
+function setOperator(v){state.operator=v;localStorage.setItem("family_operator",v);render()}
+function go(p){state.page=p;render()}
+async function refresh(){await loadFamily();alert("已重新同步")}
+async function logout(){await sb.auth.signOut();location.reload()}
+boot();
+</script>
+</body>
+</html>
