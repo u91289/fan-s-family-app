@@ -151,7 +151,7 @@ async function saveScore(){
  if(!isParent())return alert("孩子帳號沒有加分或扣分權限。");
  const n=Number(document.getElementById("score").value),r=document.getElementById("reason").value.trim(),c=state.children.find(x=>x.id===window.scoreChild);
  if(!n||n<=0||!r)return alert("請輸入點數與原因");
- if(window.scoreDir<0&&n>c.points)return alert("扣分可以超過目前點數，點數可為負分");
+ // 允許扣分超過目前點數，點數可以為負數
  const {error}=await sb.from("transactions").insert({family_id:state.family.id,child_id:c.id,child_name:c.name,operator:state.operator,kind:window.scoreDir>0?"加分":"扣分",points:window.scoreDir>0?n:-n,reason:r});
  if(error)return alert(error.message);
  const {error:u}=await sb.from("children").update({points:c.points+(window.scoreDir>0?n:-n)}).eq("id",c.id);
