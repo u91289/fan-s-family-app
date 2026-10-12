@@ -20,7 +20,7 @@ label{display:block;font-size:13px;color:var(--muted);font-weight:700;margin:11p
 .modal{position:fixed;inset:0;background:#0008;display:none;align-items:flex-end;justify-content:center;z-index:20}.modal.show{display:flex}.sheet{width:min(520px,100%);background:#fff;border-radius:22px 22px 0 0;padding:18px 18px calc(20px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}.sheet h2{margin:0 0 6px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.close{float:right;background:#f1f1f1;border-radius:50%;width:36px;height:36px;padding:0}
 .history-item{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #eee}.history-item:last-child{border-bottom:0}.hmain{min-width:0;flex:1}.hmain strong{display:block}.reason{color:var(--muted);font-size:13px;margin-top:3px;word-break:break-word}.meta{color:#9ca3af;font-size:11px;margin-top:4px}.pos{color:var(--green);font-weight:800}.neg{color:var(--red);font-weight:800}.history-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end}.edit-btn,.delete-btn{padding:7px 9px;font-size:12px;border-radius:9px}.edit-btn{background:#eef2ff;color:#4f46e5}.delete-btn{background:#fff0f0;color:var(--red)}
 .login{padding:28px 18px}.login h1{font-size:28px}.notice{background:#fff8e6;border:1px solid #f4d58d;border-radius:14px;padding:12px;font-size:13px;color:#6b4f13;line-height:1.55}
-.empty{text-align:center;color:var(--muted);padding:30px 10px}.small{font-size:12px;color:var(--muted);line-height:1.5}.danger{color:var(--red)}
+.quick-reasons{display:flex;flex-wrap:wrap;gap:7px;margin:7px 0 10px}.quick-chip{background:#f0f1ff;color:#454bb5;border:1px solid #dfe2ff;padding:8px 10px;font-size:13px;border-radius:999px}.phrase-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid #eee}.phrase-row:last-child{border-bottom:0}.phrase-actions{display:flex;gap:5px;flex-shrink:0}.phrase-actions button{padding:7px 8px;font-size:12px}.empty{text-align:center;color:var(--muted);padding:30px 10px}.small{font-size:12px;color:var(--muted);line-height:1.5}.danger{color:var(--red)}
 </style>
 </head>
 <body>
@@ -31,7 +31,7 @@ const SUPABASE_KEY = "sb_publishable_2OjoiiYIFHkZ1iv1VYXztg_S6ZeY-hx";
 const configured = !SUPABASE_URL.includes("請貼上") && !SUPABASE_KEY.includes("請貼上");
 const AVATAR_BUCKET = "child-photos";
 const sb = configured ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth:{persistSession:true,autoRefreshToken:true}}) : null;
-let state={page:"home",children:[],history:[],family:null,session:null,member:null,operator:""};
+let state={page:"home",children:[],history:[],reasons:[],family:null,session:null,member:null,operator:""};
 
 const app=document.getElementById("app");
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
@@ -64,12 +64,15 @@ async function loadFamily(){
   const {data:history,error:he}=await hq;
   if(he){alert(he.message);return}
   state.history=history||[];
+  const {data:reasons,error:re}=await sb.from("family_common_reasons").select("*").eq("family_id",family.id).order("kind").order("phrase");
+  if(re){ if(re.code!=="42P01") alert("讀取常用詞彙失敗："+re.message); state.reasons=[]; } else state.reasons=reasons||[];
   render();
 }
 function isParent(){return state.member?.role==="parent"}
 function subscribe(){
   sb.channel("family-sync").on("postgres_changes",{event:"*",schema:"public",table:"children",filter:`family_id=eq.${state.family.id}`},()=>loadFamily())
-    .on("postgres_changes",{event:"*",schema:"public",table:"transactions",filter:`family_id=eq.${state.family.id}`},()=>loadFamily()).subscribe();
+    .on("postgres_changes",{event:"*",schema:"public",table:"transactions",filter:`family_id=eq.${state.family.id}`},()=>loadFamily())
+    .on("postgres_changes",{event:"*",schema:"public",table:"family_common_reasons",filter:`family_id=eq.${state.family.id}`},()=>loadFamily()).subscribe();
 }
 function renderSetup(){
   app.innerHTML=`<div class="login"><h1>三寶家庭點數</h1><div class="notice">App 已連接雲端設定。請使用家長或孩子專用帳號登入。</div><p class="small">不要把 service_role / secret key 放進這個檔案。</p></div>`;
@@ -144,8 +147,10 @@ function openScore(id,dir){
  if(!isParent())return alert("孩子帳號只能查看，不能操作點數。");
  const c=state.children.find(x=>x.id===id); window.scoreChild=id;window.scoreDir=dir;
  document.getElementById("modal").classList.add("show");document.getElementById("mtitle").textContent=(dir>0?"＋ 加分":"－ 扣分")+"｜"+c.name;
- document.getElementById("mbody").innerHTML=`<label>點數</label><input id="score" type="number" min="1" step="1" placeholder="例如 10"><label>原因</label><textarea id="reason" placeholder="${dir>0?"例如：主動整理房間":"例如：沒有收玩具"}"></textarea><button class="${dir>0?"add":"minus"} style="width:100%;margin-top:12px" onclick="saveScore()">確認${dir>0?"加分":"扣分"}</button>`;
+ const kind=dir>0?"加分":"扣分"; const quick=state.reasons.filter(x=>x.kind===kind);
+ document.getElementById("mbody").innerHTML=`<label>點數</label><input id="score" type="number" min="1" step="1" placeholder="例如 10"><label>常用原因（點一下填入）</label><div class="quick-reasons">${quick.length?quick.map(x=>`<button type="button" class="quick-chip" onclick="pickReason('${x.id}')">${esc(x.phrase)}</button>`).join(""):`<div class="small">尚未設定常用詞彙，可到「設定」新增。</div>`}</div><label>原因</label><textarea id="reason" placeholder="${dir>0?"例如：主動整理房間":"例如：沒有收玩具"}"></textarea><button class="${dir>0?"add":"minus"} style="width:100%;margin-top:12px" onclick="saveScore()">確認${dir>0?"加分":"扣分"}</button>`;
 }
+function pickReason(id){const item=state.reasons.find(x=>x.id===id);if(item){document.getElementById("reason").value=item.phrase;}}
 function closeModal(){document.getElementById("modal")?.classList.remove("show")}
 async function saveScore(){
  if(!isParent())return alert("孩子帳號沒有加分或扣分權限。");
@@ -199,7 +204,7 @@ async function saveEditHistory(){
  const sign=h.points>=0?1:-1;
  const newPoints=sign*n;
  const updatedTotal=c.points-h.points+newPoints;
- if(updatedTotal<0)return alert(`修改後 ${c.name} 的點數會變成負數，目前最多只能扣 ${money(c.points-h.points)} 點。`);
+  // 允許總點數為負數，與加分／扣分規則一致。
  const {error:u}=await sb.from("children").update({points:updatedTotal}).eq("id",c.id);
  if(u)return alert("總點數更新失敗："+u.message);
  const {error:t}=await sb.from("transactions").update({points:newPoints,reason:r}).eq("id",h.id);
@@ -219,7 +224,7 @@ async function deleteHistory(id){
  const detail=`${h.child_name}｜${h.kind}｜${h.points>=0?"+":""}${money(h.points)}\n原因：${h.reason}`;
  if(!confirm(`確定要刪除這筆紀錄嗎？\n\n${detail}\n\n刪除後，${h.points>=0?"會扣回原本加上的點數":"會補回原本扣掉的點數"}。`))return;
  const restoredTotal=c.points-h.points;
- if(restoredTotal<0)return alert("目前點數資料異常，無法安全刪除這筆紀錄。");
+  // 刪除紀錄後即使總點數為負數也允許保存。
  const {error:t}=await sb.from("transactions").delete().eq("id",h.id);
  if(t)return alert("刪除紀錄失敗："+t.message);
  const {error:u}=await sb.from("children").update({points:restoredTotal}).eq("id",c.id);
@@ -280,8 +285,16 @@ async function removePhoto(){
   closeModal();await loadFamily();
 }
 function renderSettings(){
- app.innerHTML=header()+`<div class="content"><div class="section-title">⚙️ 設定</div><div class="card"><div class="notice">目前登入：<strong>${esc(state.operator)}</strong><br>${isParent()?"👨‍👩‍👧 你是家長帳號，可以管理所有點數與紀錄。":"👦 你是孩子帳號，只能查看三個孩子的點數與紀錄。"}</div></div><div class="card"><button class="ghost" style="width:100%" onclick="refresh()">🔄 立即同步</button><button class="ghost" style="width:100%;margin-top:8px" onclick="logout()">登出</button></div><div class="notice">🔐 權限由 Supabase 資料庫控制。孩子帳號即使直接操作網頁，也無法寫入、修改或刪除點數資料。</div></div>${nav()}`;
+ const phraseList=(kind)=>{const items=state.reasons.filter(x=>x.kind===kind);return items.length?items.map(x=>`<div class="phrase-row"><span>${esc(x.phrase)}</span>${isParent()?`<span class="phrase-actions"><button class="edit-btn" onclick="editPhrase('${x.id}')">修改</button><button class="delete-btn" onclick="deletePhrase('${x.id}')">刪除</button></span>`:""}</div>`).join(""):`<div class="small" style="padding:8px 0">尚未新增詞彙</div>`};
+ app.innerHTML=header()+`<div class="content"><div class="section-title">⚙️ 設定</div><div class="card"><div class="notice">目前登入：<strong>${esc(state.operator)}</strong><br>${isParent()?"👨‍👩‍👧 你是家長帳號，可以管理所有點數與紀錄。":"👦 你是孩子帳號，只能查看三個孩子的點數與紀錄。"}</div></div>
+ ${isParent()?`<div class="card"><div class="section-title">🟢 加分常用詞彙</div><div>${phraseList("加分")}</div><button class="add" style="width:100%;margin-top:12px" onclick="newPhrase('加分')">＋ 新增加分詞彙</button></div><div class="card"><div class="section-title">🔴 扣分常用詞彙</div><div>${phraseList("扣分")}</div><button class="minus" style="width:100%;margin-top:12px" onclick="newPhrase('扣分')">＋ 新增扣分詞彙</button></div>`:`<div class="card"><div class="section-title">常用詞彙</div><div class="small">加分：${state.reasons.filter(x=>x.kind==="加分").map(x=>esc(x.phrase)).join("、")||"尚未設定"}</div><div class="small" style="margin-top:8px">扣分：${state.reasons.filter(x=>x.kind==="扣分").map(x=>esc(x.phrase)).join("、")||"尚未設定"}</div></div>`}
+ <div class="card"><button class="ghost" style="width:100%" onclick="refresh()">🔄 立即同步</button><button class="ghost" style="width:100%;margin-top:8px" onclick="logout()">登出</button></div><div class="notice">🔐 權限由 Supabase 資料庫控制。常用詞彙由爸爸、媽媽管理並同步雲端；孩子帳號只能查看。</div></div>${nav()}`;
 }
+function newPhrase(kind){if(!isParent())return alert("只有家長可以管理常用詞彙。");window.editPhraseId=null;window.phraseKind=kind;showPhraseEditor(kind,"");}
+function editPhrase(id){if(!isParent())return;const item=state.reasons.find(x=>x.id===id);if(!item)return;window.editPhraseId=id;window.phraseKind=item.kind;showPhraseEditor(item.kind,item.phrase);}
+function showPhraseEditor(kind,value){document.getElementById("modal")?.remove();document.body.insertAdjacentHTML("beforeend",modal);document.getElementById("modal").classList.add("show");document.getElementById("mtitle").textContent=(window.editPhraseId?"修改":"新增")+kind+"常用詞彙";document.getElementById("mbody").innerHTML=`<label>詞彙內容</label><input id="phraseText" maxlength="60" value="${esc(value)}" placeholder="例如：主動完成作業"><button class="primary" style="width:100%;margin-top:12px" onclick="savePhrase()">儲存詞彙</button>`;}
+async function savePhrase(){if(!isParent())return alert("只有家長可以管理常用詞彙。");const phrase=document.getElementById("phraseText").value.trim();if(!phrase)return alert("請輸入詞彙");let result;if(window.editPhraseId){result=await sb.from("family_common_reasons").update({phrase}).eq("id",window.editPhraseId).eq("family_id",state.family.id);}else{result=await sb.from("family_common_reasons").insert({family_id:state.family.id,kind:window.phraseKind,phrase});}if(result.error)return alert("儲存失敗："+result.error.message);closeModal();await loadFamily();}
+async function deletePhrase(id){if(!isParent())return;if(!confirm("確定刪除這個常用詞彙？既有歷史紀錄不會受影響。"))return;const {error}=await sb.from("family_common_reasons").delete().eq("id",id).eq("family_id",state.family.id);if(error)return alert("刪除失敗："+error.message);await loadFamily();}
 function go(p){if(p==="reward"&&!isParent())p="home";state.page=p;render()}
 async function refresh(){await loadFamily();alert("已重新同步")}
 async function logout(){await sb.auth.signOut();location.reload()}
