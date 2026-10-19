@@ -186,7 +186,11 @@ function renderHistory(){
 function openEditHistory(id){
  if(!isParent())return alert("孩子帳號不能修改紀錄。");
  const h=state.history.find(x=>x.id===id);
- if(!h)return;
+ if(!h)return alert("找不到這筆紀錄，請重新整理後再試。");
+ // 保險處理：若紀錄頁未把共用視窗插入頁面，點修改時即時補上。
+ if(!document.getElementById("modal")){
+   document.body.insertAdjacentHTML("beforeend", `<div id="modal" class="modal"><div class="sheet"><button class="close" onclick="closeModal()">×</button><h2 id="mtitle"></h2><div id="mbody"></div></div></div>`);
+ }
  window.editHistoryId=id;
  document.getElementById("modal").classList.add("show");
  document.getElementById("mtitle").textContent="✏️ 修改紀錄";
@@ -214,6 +218,9 @@ async function saveEditHistory(){
  }
  closeModal();await loadFamily();
 }
+window.openEditHistory = openEditHistory;
+window.saveEditHistory = saveEditHistory;
+
 async function deleteHistory(id){
  if(!isParent())return alert("孩子帳號不能刪除紀錄。");
  const h=state.history.find(x=>x.id===id);
