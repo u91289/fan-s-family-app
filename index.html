@@ -181,7 +181,7 @@ async function redeem(){
  if(u)return alert(u.message); await loadFamily(); alert(`已完成兌換：${r}`);
 }
 function renderHistory(){
- app.innerHTML=header()+`<div class="content"><div class="section-title">📖 最近紀錄</div><div class="card">${state.history.length?state.history.map(h=>`<div class="history-item"><div class="hmain"><strong>${esc(h.child_name)}　${esc(h.kind)}</strong><div class="reason">${esc(h.reason)}</div><div class="meta">${fmt(h.created_at)} · ${esc(h.operator)}</div></div><div class="history-actions"><div class="${h.points>=0?"pos":"neg"}">${h.points>=0?"+":""}${money(h.points)}</div>${isParent()?`<button class="edit-btn" onclick="openEditHistory('${h.id}')">✏️ 修改</button><button class="delete-btn" onclick="deleteHistory('${h.id}')">🗑️ 刪除</button>`:""}</div></div>`).join(""):`<div class="empty">目前還沒有紀錄</div>`}</div></div>${nav()}`;
+ app.innerHTML=header()+`<div class="content"><div class="section-title">📖 最近紀錄</div><div class="card">${state.history.length?state.history.map(h=>`<div class="history-item"><div class="hmain"><strong>${esc(h.child_name)}　${esc(h.kind)}</strong><div class="reason">${esc(h.reason)}</div><div class="meta">${fmt(h.created_at)} · ${esc(h.operator)}</div></div><div class="history-actions"><div class="${h.points>=0?"pos":"neg"}">${h.points>=0?"+":""}${money(h.points)}</div>${isParent()?`<button class="edit-btn" onclick="openEditHistory('${h.id}')">✏️ 修改</button><button class="delete-btn" onclick="deleteHistory('${h.id}')">🗑️ 刪除</button>`:""}</div></div>`).join(""):`<div class="empty">目前還沒有紀錄</div>`}</div></div>${nav()}${modal}`;
 }
 function openEditHistory(id){
  if(!isParent())return alert("孩子帳號不能修改紀錄。");
